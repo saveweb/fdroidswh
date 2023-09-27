@@ -89,7 +89,7 @@ async def main():
 
     # very bad implementation, but it's just a simple script :)
 
-    for sourceCode in sourceCodes:
+    while sourceCode := sourceCodes.pop() if len(sourceCodes) > 0 else None:
         if sourceCode in success_repos_text:
             logging.info('Skipping %s', sourceCode)
             continue
@@ -101,7 +101,7 @@ async def main():
         logging.info('Starting %s', sourceCode)
         await asyncio.sleep(0.5)
         cors_list.append(cor)
-        if len(cors_list) >= cors_workers:
+        if len(cors_list) >= cors_workers or len(sourceCodes) == 0:
             await asyncio.gather(*cors_list)
 
             success_repos_text = success_repos.read_text() if success_repos.exists() else ''
