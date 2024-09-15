@@ -6,7 +6,7 @@ import json
 import tqdm
 import argparse
 
-from swh import git_swh
+from fdroid_push_swh.swh import git_swh
 
 json_url = 'https://f-droid.org/repo/index-v2.json'
 json_cache = Path('index-v2.json')
@@ -28,12 +28,12 @@ async def main():
     else:
         r = requests.get(json_url, stream=True)
         r.raise_for_status()
-        data = b''
+        _data = b''
         for chunk in tqdm.tqdm(r.iter_content(chunk_size=1024 * 1024), unit='chunk', unit_scale=True):
-            data += chunk
+            _data += chunk
         with json_cache.open('wb') as f:
-            f.write(data)
-        data: dict = json.loads(data)
+            f.write(_data)
+        data: dict = json.loads(_data)
     print(len(data)//1024//1024, 'MiB')
     packages = data.get('packages', {})
 

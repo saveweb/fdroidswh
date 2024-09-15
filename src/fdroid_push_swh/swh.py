@@ -78,6 +78,8 @@ async def post_git_url(client: httpx.AsyncClient, url: str, swh_token: str):
     save_request_status = r_json['save_request_status']
     request_url = r_json['request_url']
     return
+
+    # Why I commented out the following code? IDK what I thought 1 year ago (2023), lol.
     while True:
         await asyncio.sleep(10)
         r = await client.get(request_url, headers=headers, follow_redirects=True)

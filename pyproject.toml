@@ -1,0 +1,25 @@
+[project]
+name = "fdroid_push_swh"
+version = "0.1.0"
+description = "aaaa"
+authors = [
+    {name = "yzqzss", email = "yzqzss@yandex.com"},
+]
+dependencies = [
+    "requests",
+    "tqdm",
+    "httpx",
+]
+requires-python = ">=3.12"
+readme = "README.md"
+license = {text = "AGPL"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[project.scripts]
+fdroid-push-swh = "fdroid_push_swh:main"
+
+[tool.pdm]
+distribution = true
