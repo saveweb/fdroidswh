@@ -1,10 +1,10 @@
 import asyncio
 import logging
-import requests
 from pathlib import Path
 import json
-import tqdm
 import argparse
+
+import httpx
 
 from fdroid_push_swh.swh import git_swh
 
@@ -26,14 +26,12 @@ async def main():
         with json_cache.open('rb') as f:
             data = json.load(f)
     else:
-        r = requests.get(json_url, stream=True)
+        print('Downloading index-v2.json...')
+        r = httpx.get(json_url, follow_redirects=True)
         r.raise_for_status()
-        _data = b''
-        for chunk in tqdm.tqdm(r.iter_content(chunk_size=1024 * 1024), unit='chunk', unit_scale=True):
-            _data += chunk
         with json_cache.open('wb') as f:
-            f.write(_data)
-        data: dict = json.loads(_data)
+            f.write(r.content)
+        data: dict = json.loads(r.content)
     print(len(data)//1024//1024, 'MiB')
     packages = data.get('packages', {})
 

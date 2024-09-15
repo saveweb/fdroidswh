@@ -6,8 +6,6 @@ authors = [
     {name = "yzqzss", email = "yzqzss@yandex.com"},
 ]
 dependencies = [
-    "requests",
-    "tqdm",
     "httpx",
 ]
 requires-python = ">=3.12"
