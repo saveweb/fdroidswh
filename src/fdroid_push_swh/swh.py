@@ -2,46 +2,10 @@ import asyncio
 import logging
 import time
 import traceback
-from typing import Optional
-from urllib.parse import urljoin
 
 import httpx
 
-
-async def validate_git_url(client: httpx.AsyncClient, url: Optional[str]):
-    if not isinstance(url, str):
-        raise ValueError('Invalid URL')
-    if not url.startswith('https://') and not url.startswith('http://'):
-        return False
-
-    if not url.endswith('/'):
-        url += '/'
-
-    params = {
-        'service': 'git-upload-pack',
-    }
-    headers = {
-        'User-Agent': 'code/0.1.0',
-        'Git-Protocol': 'version=2',
-    }
-    refs_path = 'info/refs'
-    refs_url = urljoin(url, refs_path)
-    logging.info('GET %s', refs_url)
-    r = None
-    for _ in range(5):
-        try:
-            r = await client.get(refs_url, params=params, headers=headers, follow_redirects=True)
-            break
-        except Exception:
-            traceback.print_exc()
-            await asyncio.sleep(3)
-    if r is None:
-        return False
-    if r.headers.get('Content-Type') != 'application/x-git-upload-pack-advertisement':
-        # raise ValueError(f'Invalid Content-Type: {r.headers.get("Content-Type")}')
-        return False
-    
-    return True
+from fdroid_push_swh.git import validate_git_url
 
 async def post_git_url(client: httpx.AsyncClient, url: str, swh_token: str):
     #   POST https://archive.softwareheritage.org/api/1/origin/save/git/url/https://github.com/${GITHUB_REPOSITORY}/
@@ -51,6 +15,7 @@ async def post_git_url(client: httpx.AsyncClient, url: str, swh_token: str):
         'Authorization': f'Bearer {swh_token}',
         }
     e = 0
+    r=None
     while True:
         try:
             r = await client.post(f'https://archive.softwareheritage.org/api/1/origin/save/git/url/{url}', headers=headers, follow_redirects=True)
@@ -59,6 +24,7 @@ async def post_git_url(client: httpx.AsyncClient, url: str, swh_token: str):
             if e > 10:
                 return
             await asyncio.sleep(3)
+        assert r
         logging.info('X-RateLimit-Remaining: %s', r.headers.get('X-RateLimit-Remaining'))
         if r.status_code == 429:
             waiting_to = int(r.headers.get("x-ratelimit-reset", time.time())) - time.time() + 10

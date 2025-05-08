@@ -1,48 +1,57 @@
 import asyncio
 import logging
+import os
 from pathlib import Path
 import json
 import argparse
 
 import httpx
 
+from fdroid_push_swh.db import init_db
 from fdroid_push_swh.swh import git_swh
+from dotenv import load_dotenv
 
-json_url = 'https://f-droid.org/repo/index-v2.json'
-json_cache = Path('index-v2.json')
-success_repos = Path('success_repos.txt')
+load_dotenv()
 
+SWH_TOKEN = os.environ['SWH_TOKEN']
+
+INDEX_URL = 'https://f-droid.org/repo/index-v2.json'
+INDEX_PATH = Path('index-v2.json')
+SUCCESS_REPOS_PATH = Path('success_repos.txt')
+
+con = init_db()
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--refresh', action='store_true', help='Redownload index-v2.json')
-    parser.add_argument('--swh-token', type=str)
     parser.add_argument('--list-only', action='store_true', help='Only list repos to sourceCodes.txt, do not submit to SWH')
     return parser.parse_args()
 
 async def main():
     args = parse_args()
-    if not args.refresh and json_cache.exists():
-        with json_cache.open('rb') as f:
-            data = json.load(f)
-    else:
+    cache_size = INDEX_PATH.exists() and INDEX_PATH.stat().st_size or -1
+    
+    r_head = httpx.head(INDEX_URL, follow_redirects=True)
+    content_size = int(r_head.headers.get('content-length', 0))
+
+    if cache_size != content_size:
         print('Downloading index-v2.json...')
-        r = httpx.get(json_url, follow_redirects=True)
+        r = httpx.get(INDEX_URL, follow_redirects=True)
         r.raise_for_status()
-        with json_cache.open('wb') as f:
+        with INDEX_PATH.open('wb') as f:
             f.write(r.content)
-        data: dict = json.loads(r.content)
+
+    data: dict = json.loads(INDEX_PATH.read_bytes())
     print(len(data)//1024//1024, 'MiB')
     packages = data.get('packages', {})
-
-    # now = time.time()
 
     new_packages = {}
     for package_name in packages:
         package = packages[package_name]
-        # if package['metadata']['added']/1000 > now - 60*60*24*30:
-        #     # print(package_name)
         new_packages.update({package_name: package})
+
+    with open('cache.tmp', 'w') as f:
+        json.dump(new_packages, f ,ensure_ascii=False, indent=2)
 
     print('Sorting new packages...1')
     # newest first
@@ -76,7 +85,7 @@ async def main():
     if args.list_only:
         return
 
-    success_repos_text = success_repos.read_text() if success_repos.exists() else ''
+    success_repos_text = SUCCESS_REPOS_PATH.read_text() if SUCCESS_REPOS_PATH.exists() else ''
     
 
     cors_list = []
@@ -93,18 +102,16 @@ async def main():
             continue
         cors_codes.append(sourceCode)
 
-        assert args.swh_token, 'Please provide --swh-token'
-
-        cor = git_swh(sourceCode, swh_token=args.swh_token)
+        cor = git_swh(sourceCode, swh_token=SWH_TOKEN)
         logging.info('Starting %s', sourceCode)
         await asyncio.sleep(0.5)
         cors_list.append(cor)
         if len(cors_list) >= cors_workers or len(sourceCodes) == 0:
             await asyncio.gather(*cors_list)
 
-            success_repos_text = success_repos.read_text() if success_repos.exists() else ''
+            success_repos_text = SUCCESS_REPOS_PATH.read_text() if SUCCESS_REPOS_PATH.exists() else ''
 
-            with success_repos.open('a') as f:
+            with SUCCESS_REPOS_PATH.open('a') as f:
                 for cors_code in cors_codes:
                     if cors_code not in success_repos_text:
                         f.write(cors_code + '\n')

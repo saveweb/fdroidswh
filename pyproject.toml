@@ -7,6 +7,7 @@ authors = [
 ]
 dependencies = [
     "httpx",
+    "python-dotenv>=1.1.0",
 ]
 requires-python = ">=3.12"
 readme = "README.md"
@@ -21,3 +22,8 @@ fdroid-push-swh = "fdroid_push_swh:main"
 
 [tool.pdm]
 distribution = true
+
+[dependency-groups]
+test = [
+    "pytest>=8.3.5",
+]
