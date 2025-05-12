@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
@@ -55,7 +55,7 @@ func init() {
 
 func main() {
 	var wg = &sync.WaitGroup{}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	client := &http.Client{}
