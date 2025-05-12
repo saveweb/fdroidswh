@@ -1,11 +1,4 @@
-__pycache__
-.venv/
-
 index-v2.json
-sourceCodes.txt
-success_repos.txt
 fdroidswh
-cache.tmp.json
 .env
 db.sqlite
-.pdm-python
