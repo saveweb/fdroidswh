@@ -3,49 +3,25 @@ package main
 import (
 	"context"
 	"fdroidswh/db"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"sync"
 )
 
-func insertOrUpdatePkg(ctx context.Context, pkg string, info PackageInfo) error {
-	tx, err := dbWrite.Begin()
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-	qtx := dbWriteSqlc.WithTx(tx)
-
-	c, err := qtx.ExistApp(ctx, pkg)
-	if err != nil {
-		return err
-	}
-	if c != 0 && c != 1 {
-		panic("c must be 1 or 0")
-	}
-
-	exists := c == 1
-	if exists {
-		qtx.UpdateMeta(ctx, db.UpdateMetaParams{
-			Package:         pkg,
-			MetaAdded:       info.Metadata.Added,
-			MetaLastUpdated: info.Metadata.LastUpdated,
-			MetaSourceCode:  info.Metadata.SourceCode,
-		})
-	} else {
-		qtx.CreateApp(ctx, db.CreateAppParams{
-			Package:         pkg,
-			MetaAdded:       info.Metadata.Added,
-			MetaLastUpdated: info.Metadata.LastUpdated,
-			MetaSourceCode:  info.Metadata.SourceCode,
-		})
-	}
-
-	return tx.Commit()
+func createOrUpdatePkg(ctx context.Context, pkg string, info PackageInfo) error {
+	return dbWriteSqlc.CreateOrUpdateApp(ctx, db.CreateOrUpdateAppParams{
+		Package:         pkg,
+		MetaAdded:       info.Metadata.Added,
+		MetaLastUpdated: info.Metadata.LastUpdated,
+		MetaSourceCode:  info.Metadata.SourceCode,
+	})
 }
 
 func loadToDB(ctx context.Context) {
+	indexMu.Lock()
+	defer indexMu.Unlock()
 	f, err := os.Open(INDEX_PATH)
 	data, _ := io.ReadAll(f)
 
@@ -54,8 +30,11 @@ func loadToDB(ctx context.Context) {
 		panic(err)
 	}
 	slog.Info("loading to db", "packages", len(pkgmap))
+	c := 0
 	for pkg, info := range pkgmap {
-		err := insertOrUpdatePkg(ctx, pkg, info)
+		c += 1
+		fmt.Printf("[%d/%d] %s  \r", c, len(pkgmap), pkg)
+		err := createOrUpdatePkg(ctx, pkg, info)
 		if err != nil {
 			panic(err)
 		}

@@ -17,7 +17,7 @@ import (
 )
 
 const INDEX_PATH = "index-v2.json"
-const INDEX_URL = "https://ftp.fau.de/fdroid/repo/index-v2.json"
+const INDEX_URL = "https://mirrors.tuna.tsinghua.edu.cn/fdroid/repo/index-v2.json"
 
 //go:embed schema.sql
 var ddl string

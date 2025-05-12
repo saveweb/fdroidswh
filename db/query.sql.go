@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 const createApp = `-- name: CreateApp :exec
@@ -30,6 +31,58 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) error {
 	return err
 }
 
+const createOrUpdateApp = `-- name: CreateOrUpdateApp :exec
+INSERT INTO apps (package, meta_added, meta_last_updated, meta_source_code)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(package) DO UPDATE SET
+    meta_added = excluded.meta_added,
+    meta_last_updated = excluded.meta_last_updated,
+    meta_source_code = excluded.meta_source_code
+`
+
+type CreateOrUpdateAppParams struct {
+	Package         string
+	MetaAdded       int64
+	MetaLastUpdated int64
+	MetaSourceCode  string
+}
+
+func (q *Queries) CreateOrUpdateApp(ctx context.Context, arg CreateOrUpdateAppParams) error {
+	_, err := q.db.ExecContext(ctx, createOrUpdateApp,
+		arg.Package,
+		arg.MetaAdded,
+		arg.MetaLastUpdated,
+		arg.MetaSourceCode,
+	)
+	return err
+}
+
+const createOrUpdateTask = `-- name: CreateOrUpdateTask :exec
+INSERT INTO tasks (id, save_request_status, save_task_status, snapshot_swhid)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    save_request_status = excluded.save_request_status,
+    save_task_status = excluded.save_task_status,
+    snapshot_swhid = excluded.snapshot_swhid
+`
+
+type CreateOrUpdateTaskParams struct {
+	ID                int64
+	SaveRequestStatus string
+	SaveTaskStatus    string
+	SnapshotSwhid     sql.NullString
+}
+
+func (q *Queries) CreateOrUpdateTask(ctx context.Context, arg CreateOrUpdateTaskParams) error {
+	_, err := q.db.ExecContext(ctx, createOrUpdateTask,
+		arg.ID,
+		arg.SaveRequestStatus,
+		arg.SaveTaskStatus,
+		arg.SnapshotSwhid,
+	)
+	return err
+}
+
 const existApp = `-- name: ExistApp :one
 SELECT EXISTS(SELECT 1 FROM apps WHERE package = ?)
 `
@@ -42,7 +95,7 @@ func (q *Queries) ExistApp(ctx context.Context, package_ string) (int64, error) 
 }
 
 const getApp = `-- name: GetApp :one
-SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered FROM apps
+SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered, last_task_id FROM apps
 WHERE package = ? LIMIT 1
 `
 
@@ -55,12 +108,13 @@ func (q *Queries) GetApp(ctx context.Context, package_ string) (App, error) {
 		&i.MetaLastUpdated,
 		&i.MetaSourceCode,
 		&i.LastSaveTriggered,
+		&i.LastTaskID,
 	)
 	return i, err
 }
 
 const getAppNeedSave = `-- name: GetAppNeedSave :many
-SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered FROM apps
+SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered, last_task_id FROM apps
 WHERE meta_last_updated > last_save_triggered LIMIT ?
 `
 
@@ -79,6 +133,7 @@ func (q *Queries) GetAppNeedSave(ctx context.Context, limit int64) ([]App, error
 			&i.MetaLastUpdated,
 			&i.MetaSourceCode,
 			&i.LastSaveTriggered,
+			&i.LastTaskID,
 		); err != nil {
 			return nil, err
 		}
@@ -93,6 +148,23 @@ func (q *Queries) GetAppNeedSave(ctx context.Context, limit int64) ([]App, error
 	return items, nil
 }
 
+const getTask = `-- name: GetTask :one
+SELECT id, save_request_status, save_task_status, snapshot_swhid FROM tasks
+WHERE id = ? LIMIT 1
+`
+
+func (q *Queries) GetTask(ctx context.Context, id int64) (Task, error) {
+	row := q.db.QueryRowContext(ctx, getTask, id)
+	var i Task
+	err := row.Scan(
+		&i.ID,
+		&i.SaveRequestStatus,
+		&i.SaveTaskStatus,
+		&i.SnapshotSwhid,
+	)
+	return i, err
+}
+
 const updateLastSaveTriggered = `-- name: UpdateLastSaveTriggered :exec
 UPDATE apps SET last_save_triggered = ?
 WHERE package = ?
@@ -105,6 +177,21 @@ type UpdateLastSaveTriggeredParams struct {
 
 func (q *Queries) UpdateLastSaveTriggered(ctx context.Context, arg UpdateLastSaveTriggeredParams) error {
 	_, err := q.db.ExecContext(ctx, updateLastSaveTriggered, arg.LastSaveTriggered, arg.Package)
+	return err
+}
+
+const updateLastTaskId = `-- name: UpdateLastTaskId :exec
+UPDATE apps SET last_task_id = ?
+WHERE package = ?
+`
+
+type UpdateLastTaskIdParams struct {
+	LastTaskID sql.NullInt64
+	Package    string
+}
+
+func (q *Queries) UpdateLastTaskId(ctx context.Context, arg UpdateLastTaskIdParams) error {
+	_, err := q.db.ExecContext(ctx, updateLastTaskId, arg.LastTaskID, arg.Package)
 	return err
 }
 

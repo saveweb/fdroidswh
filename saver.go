@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fdroidswh/db"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +20,7 @@ import (
 
 var SWH_TOKEN string
 
-func int() {
+func init() {
 	godotenv.Load()
 	SWH_TOKEN = os.Getenv("SWH_TOKEN")
 	if SWH_TOKEN == "" {
@@ -75,7 +78,22 @@ func validateGitUrl(ctx context.Context, client *http.Client, sourceCode string)
 	return false, errors.New("retries exceeded")
 }
 
-func pushSWH(ctx context.Context, client *http.Client, sourceCode string) (string, error) {
+type TaskResp struct {
+	// The request ID
+	ID int32 `json:"id" validate:"required"`
+	// not created, pending, scheduled, running, succeeded or failed
+	SaveTaskStatus string `json:"save_task_status" validate:"oneof='not created' pending scheduled running succeeded failed"`
+	// accepted, rejected or pending
+	SaveRequestStatus string `json:"save_request_status" validate:"oneof=accepted rejected pending"`
+	// snapshot_swhid (null if it is missing or unknown)
+	SnapshotSwhid string `json:"snapshot_swhid"`
+	RequestUrl    string `json:"request_url" validate:"http_url"`
+}
+
+var RateLimited = errors.New("too many requests")
+
+func pushSWH(ctx context.Context, client *http.Client, sourceCode string) (TaskResp, error) {
+	var TaskResp TaskResp
 	if !strings.HasSuffix(sourceCode, "/") {
 		sourceCode = sourceCode + "/"
 	}
@@ -86,26 +104,170 @@ func pushSWH(ctx context.Context, client *http.Client, sourceCode string) (strin
 	pushURL := "https://archive.softwareheritage.org/api/1/origin/save/git/url/" + sourceCode
 	req, err := http.NewRequestWithContext(ctx, "POST", pushURL, nil)
 	if err != nil {
-		return "", err
+		return TaskResp, err
 	}
 
+	req.Header.Set("Authorization", "Bearer "+SWH_TOKEN)
+	req.Header.Set("User-Agent", "fdroidswh-git")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return TaskResp, err
+	}
+	defer resp.Body.Close()
+
+	// X-RateLimit-Remaining
+	slog.Info("pushSWH", "X-RateLimit-Remaining", resp.Header.Get("X-RateLimit-Remaining"))
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return TaskResp, RateLimited
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return TaskResp, errors.New("push failed")
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&TaskResp); err != nil {
+		return TaskResp, err
+	}
+
+	return TaskResp, nil
 }
 
-func validateAndPushToSWH(ctx context.Context, client *http.Client, pkg, sourceCode string) error {
-	ok, err := validateGitUrl(ctx, client, sourceCode)
+func fetchTaskStatus(ctx context.Context, client *http.Client, requestUrl string) (TaskResp, error) {
+	var TaskResp TaskResp
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", requestUrl, nil)
 	if err != nil {
-		return err
+		return TaskResp, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+SWH_TOKEN)
+	req.Header.Set("User-Agent", "fdroidswh-git")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return TaskResp, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return TaskResp, errors.New("get task status failed")
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&TaskResp); err != nil {
+		return TaskResp, err
+	}
+
+	return TaskResp, nil
+}
+
+func saveTaskRespToDB(ctx context.Context, taskResp TaskResp) error {
+	return dbWriteSqlc.CreateOrUpdateTask(ctx, db.CreateOrUpdateTaskParams{
+		ID:                int64(taskResp.ID),
+		SaveTaskStatus:    taskResp.SaveTaskStatus,
+		SaveRequestStatus: taskResp.SaveRequestStatus,
+		SnapshotSwhid:     sql.NullString{String: taskResp.SnapshotSwhid, Valid: taskResp.SnapshotSwhid != ""},
+	})
+}
+
+var notValidGitUrl = errors.New("the sourceCode is not a valid git url")
+
+func validateAndPushToSWH(ctx context.Context, client *http.Client, pkg, sourceCode string) error {
+	var ok bool
+	var err error
+
+	for range 3 {
+		ok, err = validateGitUrl(ctx, client, sourceCode)
+		if err != nil {
+			slog.Warn("retrying validateGitUrl", "sourceCode", sourceCode, "err", err)
+			continue
+		}
+		break
 	}
 
 	if !ok {
-		return dbWriteSqlc.UpdateLastSaveTriggered(ctx, db.UpdateLastSaveTriggeredParams{
-			Package:           pkg,
-			LastSaveTriggered: time.Now().UnixMilli(),
-		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return errors.Join(err, notValidGitUrl)
+		}
+
+		return notValidGitUrl
 	}
 
 	// ok
+	slog.Info("validateGitUrl ok", "sourceCode", sourceCode)
+	var taskResp TaskResp
+	for i := 0; i < 3; i++ {
+		taskResp, err = pushSWH(ctx, client, sourceCode)
+		if err != nil {
+			if errors.Is(err, RateLimited) {
+				slog.Warn("pushSWH rate limited", "sourceCode", sourceCode, "err", err)
+				i -= 1 // always retry
+				time.Sleep(60 * time.Second)
+				continue
+			} else if errors.Is(err, context.Canceled) {
+				return err
+			}
+			slog.Warn("retrying pushSWH", "sourceCode", sourceCode, "err", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+		break
+	}
 
+	if err != nil {
+		slog.Warn("pushSWH failed", "sourceCode", sourceCode, "err", err)
+		return err
+	}
+
+	// ok
+	slog.Info("pushSWH action ok", "sourceCode", sourceCode, "taskResp", taskResp)
+	// save task to db
+	if err := saveTaskRespToDB(ctx, taskResp); err != nil {
+		return err
+	}
+	// update last task id
+	if err := dbWriteSqlc.UpdateLastTaskId(ctx, db.UpdateLastTaskIdParams{
+		Package:    pkg,
+		LastTaskID: sql.NullInt64{Int64: int64(taskResp.ID), Valid: true},
+	}); err != nil {
+		return err
+	}
+
+	if taskResp.SaveRequestStatus == "rejected" {
+		slog.Warn("pushSWH rejected", "sourceCode", sourceCode, "err", err)
+		return errors.New("pushSWH rejected")
+	}
+
+	for !slices.Contains([]string{"succeeded", "failed"}, taskResp.SaveTaskStatus) {
+		time.Sleep(10 * time.Second)
+		newTaskResp, err := fetchTaskStatus(ctx, client, taskResp.RequestUrl)
+		if err != nil {
+			if errors.Is(err, RateLimited) {
+				slog.Warn("fetchTaskStatus rate limited", "sourceCode", sourceCode, "err", err)
+				time.Sleep(60 * time.Second)
+				continue
+			} else if errors.Is(err, context.Canceled) {
+				return err
+			}
+
+			slog.Warn("retrying fetchTaskStatus", "sourceCode", sourceCode, "err", err)
+			time.Sleep(20 * time.Second)
+			continue
+		}
+
+		taskResp = newTaskResp
+		slog.Info("fetchTaskStatus ok", "sourceCode", sourceCode, "taskResp", taskResp)
+		if err := saveTaskRespToDB(ctx, taskResp); err != nil {
+			return err
+		}
+		continue
+	}
+
+	return nil
 }
 
 func saver(ctx context.Context, wg *sync.WaitGroup, client *http.Client) {
@@ -124,7 +286,28 @@ func saver(ctx context.Context, wg *sync.WaitGroup, client *http.Client) {
 			continue
 		}
 		for _, app := range apps {
-			validateAndPushToSWH(ctx, client, app.Package, app.MetaSourceCode)
+			wg := &sync.WaitGroup{}
+			wg.Add(1)
+			go func(ctx context.Context, client *http.Client, app db.App, wg *sync.WaitGroup) {
+				defer wg.Done()
+				err := validateAndPushToSWH(ctx, client, app.Package, app.MetaSourceCode)
+				if err != nil {
+					// if context.Canceled, do not update the last save triggered
+					if errors.Is(err, context.Canceled) {
+						slog.Warn("context canceled", "err", err)
+						return
+					}
+					slog.Error("validateAndPushToSWH failed", "sourceCode", app.MetaSourceCode, "err", err)
+				} else {
+					slog.Info("validateAndPushToSWH ok", "sourceCode", app.MetaSourceCode, "err", err)
+				}
+
+				dbWriteSqlc.UpdateLastSaveTriggered(ctx, db.UpdateLastSaveTriggeredParams{
+					Package:           app.Package,
+					LastSaveTriggered: time.Now().UnixMilli(),
+				})
+			}(ctx, client, app, wg)
+			wg.Wait()
 		}
 	}
 }

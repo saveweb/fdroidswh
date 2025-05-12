@@ -14,13 +14,12 @@ type App struct {
 	MetaLastUpdated   int64
 	MetaSourceCode    string
 	LastSaveTriggered int64
+	LastTaskID        sql.NullInt64
 }
 
 type Task struct {
 	ID                int64
-	SaveRequestStatus sql.NullString
-	SaveTaskStatus    sql.NullString
+	SaveRequestStatus string
+	SaveTaskStatus    string
 	SnapshotSwhid     sql.NullString
-	HeadRevision      sql.NullString
-	HeadRevisionDate  sql.NullString
 }
