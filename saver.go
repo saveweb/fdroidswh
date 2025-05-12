@@ -206,7 +206,7 @@ func validateAndPushToSWH(ctx context.Context, client *http.Client, pkg, sourceC
 			if errors.Is(err, RateLimited) {
 				slog.Warn("pushSWH rate limited", "sourceCode", sourceCode, "err", err)
 				i -= 1 // always retry
-				sleepCtx(ctx, 60*time.Second)
+				sleepCtx(ctx, 300*time.Second)
 				continue
 			} else if errors.Is(err, context.Canceled) {
 				return err
