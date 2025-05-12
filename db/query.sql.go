@@ -95,7 +95,7 @@ func (q *Queries) ExistApp(ctx context.Context, package_ string) (int64, error) 
 }
 
 const getAllApps = `-- name: GetAllApps :many
-SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered, last_task_id FROM apps
+SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered, last_task_id FROM apps_ordered
 WHERE package LIKE ? LIMIT ? OFFSET ?
 `
 
@@ -105,15 +105,15 @@ type GetAllAppsParams struct {
 	Offset  int64
 }
 
-func (q *Queries) GetAllApps(ctx context.Context, arg GetAllAppsParams) ([]App, error) {
+func (q *Queries) GetAllApps(ctx context.Context, arg GetAllAppsParams) ([]AppsOrdered, error) {
 	rows, err := q.db.QueryContext(ctx, getAllApps, arg.Package, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []App
+	var items []AppsOrdered
 	for rows.Next() {
-		var i App
+		var i AppsOrdered
 		if err := rows.Scan(
 			&i.Package,
 			&i.MetaAdded,
@@ -155,19 +155,19 @@ func (q *Queries) GetApp(ctx context.Context, package_ string) (App, error) {
 }
 
 const getAppNeedSave = `-- name: GetAppNeedSave :many
-SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered, last_task_id FROM apps
+SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered, last_task_id FROM apps_ordered
 WHERE meta_last_updated > last_save_triggered LIMIT ?
 `
 
-func (q *Queries) GetAppNeedSave(ctx context.Context, limit int64) ([]App, error) {
+func (q *Queries) GetAppNeedSave(ctx context.Context, limit int64) ([]AppsOrdered, error) {
 	rows, err := q.db.QueryContext(ctx, getAppNeedSave, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []App
+	var items []AppsOrdered
 	for rows.Next() {
-		var i App
+		var i AppsOrdered
 		if err := rows.Scan(
 			&i.Package,
 			&i.MetaAdded,

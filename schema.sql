@@ -16,3 +16,6 @@ CREATE TABLE IF NOT EXISTS tasks(
 CREATE INDEX IF NOT EXISTS apps_meta_added ON apps (meta_added);
 CREATE INDEX IF NOT EXISTS apps_meta_last_updated ON apps (meta_last_updated);
 CREATE INDEX IF NOT EXISTS apps_last_save_triggered ON apps (last_save_triggered);
+
+CREATE VIEW IF NOT EXISTS apps_ordered AS
+SELECT * FROM apps ORDER BY meta_last_updated DESC;

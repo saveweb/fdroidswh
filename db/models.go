@@ -17,6 +17,15 @@ type App struct {
 	LastTaskID        sql.NullInt64
 }
 
+type AppsOrdered struct {
+	Package           string
+	MetaAdded         int64
+	MetaLastUpdated   int64
+	MetaSourceCode    string
+	LastSaveTriggered int64
+	LastTaskID        sql.NullInt64
+}
+
 type Task struct {
 	ID                int64
 	SaveRequestStatus string

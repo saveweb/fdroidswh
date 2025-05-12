@@ -3,7 +3,7 @@ SELECT * FROM apps
 WHERE package = ? LIMIT 1;
 
 -- name: GetAllApps :many
-SELECT * FROM apps
+SELECT * FROM apps_ordered
 WHERE package LIKE ? LIMIT ? OFFSET ?;
 
 -- name: ExistApp :one
@@ -29,7 +29,7 @@ UPDATE apps SET last_save_triggered = ?
 WHERE package = ?;
 
 -- name: GetAppNeedSave :many
-SELECT * FROM apps
+SELECT * FROM apps_ordered
 WHERE meta_last_updated > last_save_triggered LIMIT ?;
 
 -- name: UpdateLastTaskId :exec

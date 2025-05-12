@@ -288,7 +288,7 @@ func saver(ctx context.Context, wg *sync.WaitGroup, client *http.Client) {
 		sem := make(chan struct{}, 10)
 		for _, app := range apps {
 			sem <- struct{}{}
-			go func(ctx context.Context, client *http.Client, app db.App, sem chan struct{}) {
+			go func(ctx context.Context, client *http.Client, app db.AppsOrdered, sem chan struct{}) {
 				defer func() { <-sem }()
 				err := validateAndPushToSWH(ctx, client, app.Package, app.MetaSourceCode)
 				if err != nil {
