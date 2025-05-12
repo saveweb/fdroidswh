@@ -4,19 +4,20 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
-	"fdroidswh/db"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
+	"github.com/saveweb/fdroidswh/db"
 )
 
-const INDEX_PATH = "index-v2.json"
+const INDEX_PATH = "data/index-v2.json"
 const INDEX_URL = "https://mirrors.tuna.tsinghua.edu.cn/fdroid/repo/index-v2.json"
 
 //go:embed schema.sql
@@ -29,9 +30,16 @@ var (
 	dbWriteSqlc *db.Queries
 )
 
+func sleepCtx(ctx context.Context, delay time.Duration) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(delay):
+	}
+}
+
 func init() {
 	var err error
-	dbWrite, err = sql.Open("sqlite3", "file:db.sqlite")
+	dbWrite, err = sql.Open("sqlite3", "file:data/db.sqlite")
 	if err != nil {
 		panic(err)
 	}
@@ -53,10 +61,11 @@ func main() {
 	client := &http.Client{}
 	updateNotify := make(chan struct{})
 
-	wg.Add(3)
+	wg.Add(4)
 	go indexUpdater(ctx, wg, client, updateNotify)
 	go indexLoader(ctx, wg, updateNotify)
 	go saver(ctx, wg, client)
+	go webui(ctx, wg)
 
 	select {
 	case <-ctx.Done():

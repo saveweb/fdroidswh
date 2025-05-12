@@ -1,4 +1,4 @@
-module fdroidswh
+module github.com/saveweb/fdroidswh
 
 go 1.24.2
 

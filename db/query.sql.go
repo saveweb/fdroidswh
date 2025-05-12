@@ -94,6 +94,47 @@ func (q *Queries) ExistApp(ctx context.Context, package_ string) (int64, error) 
 	return column_1, err
 }
 
+const getAllApps = `-- name: GetAllApps :many
+SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered, last_task_id FROM apps
+WHERE package LIKE ? LIMIT ? OFFSET ?
+`
+
+type GetAllAppsParams struct {
+	Package string
+	Limit   int64
+	Offset  int64
+}
+
+func (q *Queries) GetAllApps(ctx context.Context, arg GetAllAppsParams) ([]App, error) {
+	rows, err := q.db.QueryContext(ctx, getAllApps, arg.Package, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []App
+	for rows.Next() {
+		var i App
+		if err := rows.Scan(
+			&i.Package,
+			&i.MetaAdded,
+			&i.MetaLastUpdated,
+			&i.MetaSourceCode,
+			&i.LastSaveTriggered,
+			&i.LastTaskID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getApp = `-- name: GetApp :one
 SELECT package, meta_added, meta_last_updated, meta_source_code, last_save_triggered, last_task_id FROM apps
 WHERE package = ? LIMIT 1

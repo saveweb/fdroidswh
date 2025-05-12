@@ -1,0 +1,16 @@
+version: '3.7'
+
+services:
+  fdroidswh:
+    image: fdroidswh
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    hostname: fdroidswh
+    command: ["/app/fdroidswh"]
+    ports:
+      - "8600:8080"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env

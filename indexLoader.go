@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"fdroidswh/db"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"sync"
+
+	"github.com/saveweb/fdroidswh/db"
 )
 
 func createOrUpdatePkg(ctx context.Context, pkg string, info PackageInfo) error {

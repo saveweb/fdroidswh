@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fdroidswh/db"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/saveweb/fdroidswh/db"
 )
 
 var SWH_TOKEN string
@@ -206,13 +206,13 @@ func validateAndPushToSWH(ctx context.Context, client *http.Client, pkg, sourceC
 			if errors.Is(err, RateLimited) {
 				slog.Warn("pushSWH rate limited", "sourceCode", sourceCode, "err", err)
 				i -= 1 // always retry
-				time.Sleep(60 * time.Second)
+				sleepCtx(ctx, 60*time.Second)
 				continue
 			} else if errors.Is(err, context.Canceled) {
 				return err
 			}
 			slog.Warn("retrying pushSWH", "sourceCode", sourceCode, "err", err)
-			time.Sleep(10 * time.Second)
+			sleepCtx(ctx, 10*time.Second)
 			continue
 		}
 		break
@@ -243,19 +243,19 @@ func validateAndPushToSWH(ctx context.Context, client *http.Client, pkg, sourceC
 	}
 
 	for !slices.Contains([]string{"succeeded", "failed"}, taskResp.SaveTaskStatus) {
-		time.Sleep(10 * time.Second)
+		sleepCtx(ctx, 10*time.Second)
 		newTaskResp, err := fetchTaskStatus(ctx, client, taskResp.RequestUrl)
 		if err != nil {
 			if errors.Is(err, RateLimited) {
 				slog.Warn("fetchTaskStatus rate limited", "sourceCode", sourceCode, "err", err)
-				time.Sleep(60 * time.Second)
+				sleepCtx(ctx, 60*time.Second)
 				continue
 			} else if errors.Is(err, context.Canceled) {
 				return err
 			}
 
 			slog.Warn("retrying fetchTaskStatus", "sourceCode", sourceCode, "err", err)
-			time.Sleep(20 * time.Second)
+			sleepCtx(ctx, 20*time.Second)
 			continue
 		}
 
@@ -272,7 +272,7 @@ func validateAndPushToSWH(ctx context.Context, client *http.Client, pkg, sourceC
 
 func saver(ctx context.Context, wg *sync.WaitGroup, client *http.Client) {
 	defer wg.Done()
-	const batchSize = 5
+	const batchSize = 100
 	for {
 		select {
 		case <-ctx.Done():
@@ -285,11 +285,11 @@ func saver(ctx context.Context, wg *sync.WaitGroup, client *http.Client) {
 			slog.Error("GetAppNeedSave", "err", err)
 			continue
 		}
+		sem := make(chan struct{}, 10)
 		for _, app := range apps {
-			wg := &sync.WaitGroup{}
-			wg.Add(1)
-			go func(ctx context.Context, client *http.Client, app db.App, wg *sync.WaitGroup) {
-				defer wg.Done()
+			sem <- struct{}{}
+			go func(ctx context.Context, client *http.Client, app db.App, sem chan struct{}) {
+				defer func() { <-sem }()
 				err := validateAndPushToSWH(ctx, client, app.Package, app.MetaSourceCode)
 				if err != nil {
 					// if context.Canceled, do not update the last save triggered
@@ -306,8 +306,12 @@ func saver(ctx context.Context, wg *sync.WaitGroup, client *http.Client) {
 					Package:           app.Package,
 					LastSaveTriggered: time.Now().UnixMilli(),
 				})
-			}(ctx, client, app, wg)
-			wg.Wait()
+			}(ctx, client, app, sem)
 		}
+
+		for range cap(sem) {
+			sem <- struct{}{}
+		}
+		close(sem)
 	}
 }

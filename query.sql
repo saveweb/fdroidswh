@@ -2,6 +2,10 @@
 SELECT * FROM apps
 WHERE package = ? LIMIT 1;
 
+-- name: GetAllApps :many
+SELECT * FROM apps
+WHERE package LIKE ? LIMIT ? OFFSET ?;
+
 -- name: ExistApp :one
 SELECT EXISTS(SELECT 1 FROM apps WHERE package = ?);
 
