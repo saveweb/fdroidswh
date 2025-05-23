@@ -285,6 +285,11 @@ func saver(ctx context.Context, wg *sync.WaitGroup, client *http.Client) {
 			slog.Error("GetAppNeedSave", "err", err)
 			continue
 		}
+		if len(apps) == 0 {
+			slog.Info("no app need save")
+			sleepCtx(ctx, 10*time.Minute)
+			continue
+		}
 		sem := make(chan struct{}, 10)
 		for _, app := range apps {
 			sem <- struct{}{}
